@@ -147,6 +147,27 @@ static void o_ldsym64(int dst, Sym *sym, int64_t addend)
     o_ldimm64(dst, 0);
 }
 
+static int bpf_section_sym_index(Section *sec)
+{
+    ElfSym *sym;
+    int i, n;
+
+    n = symtab_section->data_offset / sizeof(ElfSym);
+    sym = (ElfSym *)symtab_section->data + 1;
+    for (i = 1; i < n; i++, sym++) {
+        if (ELFW(ST_TYPE)(sym->st_info) == STT_SECTION
+            && sym->st_shndx == sec->sh_num
+            && sym->st_name
+            && ((char *)symtab_section->link->data)[sym->st_name]) {
+            return i;
+        }
+    }
+
+    return put_elf_sym(symtab_section, 0, 0,
+                       ELFW(ST_INFO)(STB_LOCAL, STT_SECTION),
+                       0, sec->sh_num, sec->name);
+}
+
 static int bpf_size(int size)
 {
     return size == 1 ? BPF_B : size == 2 ? BPF_H : size == 4 ? BPF_W : BPF_DW;
@@ -360,7 +381,12 @@ static void gen_opil(int op, int is64)
     a = vtop[-1].r;
     b = vtop[0].r;
     vtop -= 2;
-    d = get_reg(RC_INT);
+    /*
+     * Use the left operand as the destination.  Allocating a new result
+     * register here can pick the right operand after both operands are
+     * popped from the value stack, clobbering it before the ALU operation.
+     */
+    d = a;
     vtop++;
     vtop[0].r = d;
     switch (op) {
@@ -442,8 +468,8 @@ ST_FUNC void gen_cvt_ftof(int t)
 ST_FUNC void gfunc_call(int nb_args)
 {
     int i;
-    if (nb_args > 5)
-        tcc_error("bpf supports at most five call arguments");
+    if (nb_args > 9)
+        tcc_error("bpf supports at most nine call arguments");
     for (i = 0; i < nb_args; i++) {
         vrotb(nb_args - i);
         gv(RC_R(i + 1));
@@ -454,12 +480,34 @@ ST_FUNC void gfunc_call(int nb_args)
     if ((vtop->r & (VT_VALMASK | VT_LVAL)) == VT_CONST) {
         if (vtop->r & VT_SYM) {
             int imm = -1;
+            int reloc_sym = vtop->sym->c;
+            int use_greloc = !reloc_sym;
+            int unresolved_extern =
+                !reloc_sym
+                && (vtop->sym->type.t & VT_EXTERN)
+                && !(vtop->sym->type.t & (VT_STATIC | VT_INLINE));
             if (vtop->sym->c) {
                 ElfSym *esym = elfsym(vtop->sym);
-                if (esym->st_shndx == cur_text_section->sh_num)
-                    imm = esym->st_value / 8 - 1;
+                if (esym->st_shndx > 0 && esym->st_shndx < tcc_state->nb_sections) {
+                    Section *target = tcc_state->sections[esym->st_shndx];
+                    if (target == cur_text_section) {
+                        imm = esym->st_value / 8 - ind / 8 - 1;
+                        reloc_sym = 0;
+                        use_greloc = 0;
+                    } else if (target && (target->sh_flags & SHF_EXECINSTR)) {
+                        imm = esym->st_value / 8 - 1;
+                        reloc_sym = bpf_section_sym_index(target);
+                        use_greloc = 0;
+                    }
+                }
             }
-            greloca(cur_text_section, vtop->sym, ind, R_BPF_64_32, 0);
+            if (nb_args > 5 && unresolved_extern)
+                tcc_error("bpf helper calls support at most five arguments");
+            if (use_greloc)
+                greloca(cur_text_section, vtop->sym, ind, R_BPF_64_32, 0);
+            else if (reloc_sym)
+                put_elf_reloc(symtab_section, cur_text_section, ind,
+                              R_BPF_64_32, reloc_sym);
             obpf(BPF_JMP | BPF_CALL, 0, 1, 0, imm);
         } else {
             obpf(BPF_JMP | BPF_CALL, 0, 0, 0, vtop->c.i);
@@ -481,8 +529,8 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
         size = type_size(&sym->type, &align);
         if (size > 8 || (sym->type.t & VT_BTYPE) == VT_STRUCT)
             tcc_error("unsupported bpf parameter type");
-        if (arg > 5)
-            tcc_error("bpf supports at most five function parameters");
+        if (arg > 9)
+            tcc_error("bpf supports at most nine function parameters");
         loc -= 8;
         obpf(BPF_STX | BPF_DW | BPF_MEM, BPF_FP, arg, loc, 0);
         gfunc_set_param(sym, loc, 0);
