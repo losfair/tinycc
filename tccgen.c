@@ -7921,7 +7921,7 @@ static void init_putv(init_params *p, CType *type, unsigned long c)
 				   c + rel->r_offset - esym->st_value,
 				   ELFW(R_TYPE)(rel->r_info),
 				   ELFW(R_SYM)(rel->r_info),
-#if PTR_SIZE == 8
+#if SHT_RELX == SHT_RELA
 				   rel->r_addend
 #else
 				   0

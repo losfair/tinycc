@@ -135,6 +135,9 @@ static const char help2[] =
 #ifdef TCC_TARGET_X86_64
     "  no-sse                        disable floats on x86_64\n"
 #endif
+#ifdef TCC_TARGET_BPF
+    "  cpu=v1|v2|v3                  select eBPF CPU version\n"
+#endif
     "-Wl,... linker options:\n"
     "  -nostdlib                     do not search standard library paths\n"
     "  -[no-]whole-archive           load lib(s) fully/only as needed\n"
@@ -192,6 +195,8 @@ static const char version[] =
         "AArch64"
 #elif defined TCC_TARGET_RISCV64
         "riscv64"
+#elif defined TCC_TARGET_BPF
+        "bpf"
 #endif
 #ifdef TCC_TARGET_PE
         " Windows"

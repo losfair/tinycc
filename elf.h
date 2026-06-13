@@ -268,6 +268,7 @@ typedef struct
 #define EM_TILEPRO	188		/* Tilera TILEPro */
 #define EM_TILEGX	191		/* Tilera TILE-Gx */
 #define EM_RISCV	243	        /* RISC-V */
+#define EM_BPF		247		/* Linux BPF */
 #define EM_NUM		253
 
 /* If it is necessary to assign new unofficial EM_* values, please
@@ -3320,6 +3321,11 @@ typedef Elf32_Addr Elf32_Conflict;
 #define R_RISCV_SUB_ULEB128	61
 
 #define R_RISCV_NUM		62
+
+#define R_BPF_NONE		0
+#define R_BPF_64_64		1
+#define R_BPF_64_32		10
+#define R_BPF_NUM		11
 
 
 #endif	/* elf.h */

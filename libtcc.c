@@ -53,6 +53,9 @@
 #include "riscv64-gen.c"
 #include "riscv64-link.c"
 #include "riscv64-asm.c"
+#elif defined(TCC_TARGET_BPF)
+#include "bpf-gen.c"
+#include "bpf-link.c"
 #else
 #error unknown target
 #endif
@@ -2073,6 +2076,16 @@ PUB_FUNC int tcc_parse_args(TCCState *s, int *pargc, char ***pargv)
             continue;
 #endif
         case TCC_OPTION_m:
+#ifdef TCC_TARGET_BPF
+            if (strstart("cpu=", &optarg)) {
+                if (!strcmp(optarg, "v1") || !strcmp(optarg, "v2") ||
+                    !strcmp(optarg, "v3")) {
+                    s->bpf_cpu_version = optarg[1] - '0';
+                    continue;
+                }
+                return tcc_error_noabort("unsupported bpf cpu '%s'", optarg);
+            }
+#endif
             if (set_flag(s, options_m, optarg) < 0) {
                 if (x = atoi(optarg), x != 32 && x != 64)
                     goto unsupported_option;
@@ -2215,6 +2228,18 @@ unsupported_option:
         x = 0, r = 0;
         goto extra_action;
     }
+#ifdef TCC_TARGET_BPF
+    if (!s->bpf_cpu_version)
+        s->bpf_cpu_version = 3;
+    {
+        char cpuver[2] = { '0' + s->bpf_cpu_version, 0 };
+        tcc_define_symbol(s, "__BPF_CPU_VERSION__", cpuver);
+        if (s->bpf_cpu_version >= 3) {
+            tcc_define_symbol(s, "__BPF_FEATURE_ALU32", "1");
+            tcc_define_symbol(s, "__BPF_FEATURE_JMP32", "1");
+        }
+    }
+#endif
     if (!empty)
         return 0;
     if (s->verbose == 2)
