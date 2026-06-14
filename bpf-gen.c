@@ -149,6 +149,8 @@ static void o_ldimm64(int dst, int64_t imm)
 
 static void o_ldsym64(int dst, Sym *sym, int64_t addend)
 {
+    if (nocode_wanted)
+        return;
     greloca(cur_text_section, sym, ind, R_BPF_64_64, addend);
     o_ldimm64(dst, 0);
 }
@@ -479,6 +481,10 @@ ST_FUNC void gfunc_call(int nb_args)
     int i;
     if (nb_args > 8)
         tcc_error("bpf supports at most eight call arguments");
+    if (nocode_wanted) {
+        vtop -= nb_args + 1;
+        return;
+    }
     for (i = 0; i < nb_args; i++) {
         vrotb(nb_args - i);
         gv(RC_R(i + 1));
