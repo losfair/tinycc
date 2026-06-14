@@ -87,8 +87,14 @@ ST_DATA const int reg_classes[NB_REGS] = {
     RC_INT | RC_R(6),
     RC_INT | RC_R(7),
     RC_INT | RC_R(8),
-    RC_INT | RC_R(9),
+    /* r9 is reserved as a fixed scratch register for materializing
+       store/load base addresses (see BPF_SCRATCH); keep it out of the
+       allocator so a live value is never clobbered by store(). */
+    0,
 };
+
+/* fixed scratch register, never handed out by the register allocator */
+#define BPF_SCRATCH 9
 
 #if defined(CONFIG_TCC_BCHECK)
 ST_DATA int func_bound_add_epilog;
@@ -294,7 +300,7 @@ ST_FUNC void store(int r, SValue *sv)
 {
     int bt = sv->type.t & VT_BTYPE;
     int align, size = type_size(&sv->type, &align);
-    int off, base, tmp = 9;
+    int off, base, tmp = BPF_SCRATCH;
     if (bt == VT_PTR || bt == VT_FUNC)
         size = PTR_SIZE;
     if (bt == VT_STRUCT || size > 8)
@@ -447,7 +453,10 @@ ST_FUNC void gen_cvt_csti(int t)
 ST_FUNC void gen_cvt_sxtw(void)
 {
     int r = gv(RC_INT);
-    sx_reg(r, 32);
+    /* sign-extend the low 32 bits into the full 64-bit register; this must
+       use 64-bit shifts (a 32-bit shift by 32-32=0 would be a no-op) */
+    o_alui(BPF_ALU64, BPF_LSH, r, 32);
+    o_alui(BPF_ALU64, BPF_ARSH, r, 32);
 }
 
 ST_FUNC void gen_cvt_itof(int t)
@@ -468,8 +477,8 @@ ST_FUNC void gen_cvt_ftof(int t)
 ST_FUNC void gfunc_call(int nb_args)
 {
     int i;
-    if (nb_args > 9)
-        tcc_error("bpf supports at most nine call arguments");
+    if (nb_args > 8)
+        tcc_error("bpf supports at most eight call arguments");
     for (i = 0; i < nb_args; i++) {
         vrotb(nb_args - i);
         gv(RC_R(i + 1));
@@ -529,8 +538,8 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
         size = type_size(&sym->type, &align);
         if (size > 8 || (sym->type.t & VT_BTYPE) == VT_STRUCT)
             tcc_error("unsupported bpf parameter type");
-        if (arg > 9)
-            tcc_error("bpf supports at most nine function parameters");
+        if (arg > 8)
+            tcc_error("bpf supports at most eight function parameters");
         loc -= 8;
         obpf(BPF_STX | BPF_DW | BPF_MEM, BPF_FP, arg, loc, 0);
         gfunc_set_param(sym, loc, 0);
