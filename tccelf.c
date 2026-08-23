@@ -279,7 +279,8 @@ ST_FUNC void init_symtab(Section *s)
     memset(ptr + 2, 0, (nb_buckets + 1) * sizeof(int));
 }
 
-ST_FUNC Section *new_symtab(TCCState *s1,
+ST_FUNC TCC_EBPF_ALWAYS_INLINE Section *new_symtab(
+                           TCCState *s1,
                            const char *symtab_name, int sh_type, int sh_flags,
                            const char *strtab_name,
                            const char *hash_name, int hash_sh_flags)
@@ -439,8 +440,8 @@ static void rebuild_hash(Section *s, unsigned int nb_buckets)
 }
 
 /* return the symbol number */
-ST_FUNC int put_elf_sym(Section *s, addr_t value, unsigned long size,
-    int info, int other, int shndx, const char *name)
+ST_FUNC TCC_EBPF_ALWAYS_INLINE int put_elf_sym(Section *s, addr_t value,
+    unsigned long size, int info, int other, int shndx, const char *name)
 {
     int name_offset, sym_index;
     int nbuckets, h;
@@ -695,8 +696,9 @@ version_add (TCCState *s1)
 
 /* add an elf symbol : check if it is already defined and patch
    it. Return symbol index. NOTE that sh_num can be SHN_UNDEF. */
-ST_FUNC int set_elf_sym(Section *s, addr_t value, unsigned long size,
-                       int info, int other, int shndx, const char *name)
+ST_FUNC TCC_EBPF_ALWAYS_INLINE int set_elf_sym(Section *s, addr_t value,
+                       unsigned long size, int info, int other, int shndx,
+                       const char *name)
 {
     TCCState *s1 = s->s1;
     ElfW(Sym) *esym;
@@ -3693,7 +3695,9 @@ ST_FUNC int tcc_load_archive(TCCState *s1, int fd, int alacarte)
 #ifndef ELF_OBJ_ONLY
 /* Set LV[I] to the global index of sym-version (LIB,VERSION).  Maybe resizes
    LV, maybe create a new entry for (LIB,VERSION).  */
-static void set_ver_to_ver(TCCState *s1, int *n, int **lv, int i, char *lib, char *version)
+static TCC_EBPF_ALWAYS_INLINE void set_ver_to_ver(TCCState *s1, int *n,
+                                                  int **lv, int i, char *lib,
+                                                  char *version)
 {
     while (i >= *n) {
         *lv = tcc_realloc(*lv, (*n + 1) * sizeof(**lv));

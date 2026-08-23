@@ -531,8 +531,10 @@ static int put_stabs(TCCState *s1, const char *str, int type, int other, int des
     return 1;
 }
 
-static void put_stabs_r(TCCState *s1, const char *str, int type, int other, int desc,
-                        unsigned long value, Section *sec, int sym_index)
+static TCC_EBPF_ALWAYS_INLINE void put_stabs_r(TCCState *s1, const char *str,
+                                               int type, int other, int desc,
+                                               unsigned long value,
+                                               Section *sec, int sym_index)
 {
     if (put_stabs(s1, str, type, other, desc, value))
         put_elf_reloc(symtab_section, stab_section,
@@ -1535,8 +1537,11 @@ ST_FUNC void tcc_debug_line(TCCState *s1)
     }
 }
 
-static void tcc_debug_stabs (TCCState *s1, const char *str, int type, unsigned long value,
-                             Section *sec, int sym_index, int info)
+static TCC_EBPF_ALWAYS_INLINE void tcc_debug_stabs(TCCState *s1,
+                                                   const char *str, int type,
+                                                   unsigned long value,
+                                                   Section *sec,
+                                                   int sym_index, int info)
 {
     struct debug_sym *s;
 

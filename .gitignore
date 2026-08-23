@@ -22,6 +22,7 @@ tcc_p
 libtcc*.def
 
 config*.h
+!async-ebpf-host/include/config.h
 *_.h
 config*.mak
 config.texi

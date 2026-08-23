@@ -983,7 +983,9 @@ static void gen_nop(void)
 }
 
 /* Generate shift operations (LSL, LSR, ASR, ROR) */
-static void gen_shift(int rd, int rn, int rm_or_imm, int shift_type, int is_imm, int is_64bit)
+static TCC_EBPF_ALWAYS_INLINE void gen_shift(int rd, int rn, int rm_or_imm,
+                                             int shift_type, int is_imm,
+                                             int is_64bit)
 {
     uint32_t instr;
     int width = is_64bit ? 64 : 32;
@@ -1925,10 +1927,9 @@ ST_FUNC void subst_asm_operand(CString *add_str, SValue *sv, int modifier)
     }
 }
 
-ST_FUNC void asm_gen_code(ASMOperand *operands, int nb_operands,
-                          int nb_outputs, int is_output,
-                          uint8_t *clobber_regs,
-                          int out_reg)
+ST_FUNC TCC_EBPF_ALWAYS_INLINE void asm_gen_code(ASMOperand *operands,
+                          int nb_operands, int nb_outputs, int is_output,
+                          uint8_t *clobber_regs, int out_reg)
 {
     uint8_t regs_allocated[NB_ASM_REGS];
     ASMOperand *op;

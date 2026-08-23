@@ -245,6 +245,7 @@ static void tcc_concat_str(char **pp, const char *str, int sep)
 #undef free
 #undef realloc
 
+#ifndef TCC_EBPF_HOST
 static void *default_reallocator(void *ptr, unsigned long size)
 {
     void *ptr1;
@@ -278,6 +279,20 @@ LIBTCCAPI void tcc_set_realloc(TCCReallocFunc *my_realloc)
 {
     reallocator = my_realloc ? my_realloc : default_reallocator;
 }
+#else
+extern void *tcc_ebpf_reallocator(void *, unsigned long);
+#define reallocator(ptr, size) tcc_ebpf_reallocator((ptr), (size))
+
+ST_FUNC void libc_free(void *ptr)
+{
+    (void)ptr;
+}
+
+LIBTCCAPI void tcc_set_realloc(TCCReallocFunc *my_realloc)
+{
+    (void)my_realloc;
+}
+#endif
 
 /* in case MEM_DEBUG is #defined */
 #undef tcc_free
@@ -628,7 +643,12 @@ static void tcc_split_path(TCCState *s, void *p_ary, int *p_nb_ary, const char *
 /* error1() modes */
 enum { ERROR_WARN, ERROR_NOABORT, ERROR_ERROR };
 
-static void error1(int mode, const char *fmt, va_list ap)
+static void error1(int mode, const char *fmt,
+#ifdef TCC_EBPF_HOST
+                   const unsigned long *args, unsigned nargs)
+#else
+                   va_list ap)
+#endif
 {
     BufferedFile **pf, *f;
     TCCState *s1 = tcc_state;
@@ -657,7 +677,13 @@ static void error1(int mode, const char *fmt, va_list ap)
 
     cstr_new(&cs);
     if (fmt[0] == '%' && fmt[1] == 'i' && fmt[2] == ':')
-        line = va_arg(ap, int), fmt += 3;
+        line =
+#ifdef TCC_EBPF_HOST
+            nargs ? (int)*args++ : 0, nargs -= !!nargs,
+#else
+            va_arg(ap, int),
+#endif
+            fmt += 3;
     f = NULL;
     if (s1->error_set_jmp_enabled) { /* we're called while parsing a file */
         /* use upper file if inline ":asm:" or token ":paste:" */
@@ -677,10 +703,25 @@ static void error1(int mode, const char *fmt, va_list ap)
         cstr_printf(&cs, "tcc: ");
     }
     cstr_printf(&cs, mode == ERROR_WARN ? "warning: " : "error: ");
+#ifdef TCC_EBPF_HOST
+    /* Keep the freestanding guest's error path out of the token parser.  Apart
+       from making diagnostics deterministic without stdio, this avoids a
+       parser -> diagnostic -> parser call cycle that eBPF runtimes cannot
+       bound statically. */
+    cstr_printf_fixed(&cs, fmt, args, nargs);
+#else
     if (pp_expr > 1)
         pp_error(&cs); /* special handler for preprocessor expression errors */
     else
         cstr_vprintf(&cs, fmt, ap);
+#endif
+#ifdef TCC_EBPF_HOST
+    (void)s1;
+    if (mode == ERROR_ERROR) {
+        extern unsigned long tcc_ebpf_fatal(const char *, unsigned long);
+        tcc_ebpf_fatal((const char *)cs.data, cs.size - 1);
+    }
+#else
     if (!s1->error_func) {
         /* default case: stderr */
         if (s1 && s1->output_type == TCC_OUTPUT_PREPROCESS && s1->ppfp == stdout)
@@ -691,6 +732,7 @@ static void error1(int mode, const char *fmt, va_list ap)
     } else {
         s1->error_func(s1->error_opaque, (char*)cs.data);
     }
+#endif
     cstr_free(&cs);
     if (mode != ERROR_WARN)
         s1->nb_errors++;
@@ -708,6 +750,7 @@ LIBTCCAPI void tcc_set_error_func(TCCState *s, void *error_opaque, TCCErrorFunc 
 }
 
 /* error without aborting current compilation */
+#ifndef TCC_EBPF_HOST
 PUB_FUNC int _tcc_error_noabort(const char *fmt, ...)
 {
     va_list ap;
@@ -734,6 +777,27 @@ PUB_FUNC void _tcc_warning(const char *fmt, ...)
     error1(ERROR_WARN, fmt, ap);
     va_end(ap);
 }
+#else
+PUB_FUNC int _tcc_error_noabort_fixed(const char *fmt,
+                                      const unsigned long *args, unsigned nargs)
+{
+    error1(ERROR_NOABORT, fmt, args, nargs);
+    return -1;
+}
+
+PUB_FUNC void _tcc_error_fixed(const char *fmt,
+                               const unsigned long *args, unsigned nargs)
+{
+    error1(ERROR_ERROR, fmt, args, nargs);
+    exit(1);
+}
+
+PUB_FUNC void _tcc_warning_fixed(const char *fmt,
+                                 const unsigned long *args, unsigned nargs)
+{
+    error1(ERROR_WARN, fmt, args, nargs);
+}
+#endif
 
 
 /********************************************************/
@@ -1842,7 +1906,9 @@ static uint32_t parse_version(TCCState *s1, const char *version)
 #endif
 
 /* insert args from 'p' (separated by sep or ' ') into argv at position 'optind' */
-static void insert_args(TCCState *s1, char ***pargv, int *pargc, int optind, const char *p, int sep)
+static TCC_EBPF_ALWAYS_INLINE void insert_args(TCCState *s1, char ***pargv,
+                                                int *pargc, int optind,
+                                                const char *p, int sep)
 {
     int argc = 0;
     char **argv = NULL;
@@ -2264,12 +2330,17 @@ PUB_FUNC void tcc_print_stats(TCCState *s1, unsigned total_time)
 {
     if (!total_time)
         total_time = 1;
+#ifdef TCC_EBPF_HOST
+    fprintf(stderr, "# %d idents, %d lines, %u bytes, %u ms\n",
+           total_idents, total_lines, total_bytes, total_time);
+#else
     fprintf(stderr, "# %d idents, %d lines, %u bytes\n"
                     "# %0.3f s, %u lines/s, %0.1f MB/s\n",
            total_idents, total_lines, total_bytes,
            (double)total_time/1000,
            (unsigned)total_lines*1000/total_time,
            (double)total_bytes/1000/total_time);
+#endif
     fprintf(stderr, "# text %u, data.rw %u, data.ro %u, bss %u bytes\n",
            s1->total_output[0],
            s1->total_output[1],

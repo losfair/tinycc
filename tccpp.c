@@ -51,7 +51,13 @@ static TokenString unget_buf;
 static unsigned char isidnum_table[256 - CH_EOF];
 static int pp_debug_tok, pp_debug_symv;
 static int pp_counter;
+#ifdef TCC_EBPF_HOST
+static void tok_print_fixed(const int *, const char *, const unsigned long *,
+                            unsigned);
+#define tok_print(...) TCC_EBPF_FMT_CALL2(tok_print_fixed, __VA_ARGS__)
+#else
 static void tok_print(const int *str, const char *msg, ...);
+#endif
 static void next_nomacro(void);
 static void parse_number(const char *p);
 static void parse_string(const char *p, int len);
@@ -408,6 +414,7 @@ ST_FUNC void cstr_reset(CString *cstr)
     cstr->size = 0;
 }
 
+#ifndef TCC_EBPF_HOST
 ST_FUNC int cstr_vprintf(CString *cstr, const char *fmt, va_list ap)
 {
     va_list v;
@@ -436,6 +443,26 @@ ST_FUNC int cstr_printf(CString *cstr, const char *fmt, ...)
     va_end(ap);
     return len;
 }
+#else
+ST_FUNC int cstr_printf_fixed(CString *cstr, const char *fmt,
+                              const unsigned long *args, unsigned nargs)
+{
+    int len, size = 80;
+    for (;;) {
+        size += cstr->size;
+        if (size > cstr->size_allocated)
+            cstr_realloc(cstr, size);
+        size = cstr->size_allocated - cstr->size;
+        len = tcc_ebpf_snprintf(cstr->data + cstr->size, size,
+                                fmt, args, nargs);
+        if (len >= 0 && len < size)
+            break;
+        size *= 2;
+    }
+    cstr->size += len;
+    return len;
+}
+#endif
 
 /* XXX: unicode ? */
 static void add_char(CString *cstr, int c)
@@ -1763,6 +1790,12 @@ static int pragma_parse(TCCState *s1)
     return 1;
 pragma_err:
     tcc_error("malformed #pragma directive");
+#ifdef TCC_EBPF_HOST
+    /* The hosted error helper terminates the invocation, but is an ordinary
+       eBPF call in the C type system. Keep the fallback well-defined if a
+       runtime unexpectedly returns from it. */
+    return 0;
+#endif
 }
 
 /* put alternative filename */
@@ -2242,10 +2275,13 @@ static void bn_zero(unsigned int *bn)
    current token */
 static void parse_number(const char *p)
 {
-    int b, t, shift, frac_bits, s, exp_val, ch;
+    int b, t, ch;
     char *q;
+#ifndef TCC_EBPF_HOST
+    int shift, frac_bits, s, exp_val;
     unsigned int bn[BN_SIZE];
     long double d;
+#endif
 
     /* number */
     q = token_buf;
@@ -2255,7 +2291,12 @@ static void parse_number(const char *p)
     *q++ = t;
     b = 10;
     if (t == '.') {
+#ifdef TCC_EBPF_HOST
+        tcc_error("floating-point constants are unavailable in "
+                  "the eBPF-hosted compiler");
+#else
         goto float_frac_parse;
+#endif
     } else if (t == '0') {
         if (ch == 'x' || ch == 'X') {
             q--;
@@ -2287,6 +2328,14 @@ static void parse_number(const char *p)
         *q++ = ch;
         ch = *p++;
     }
+#ifdef TCC_EBPF_HOST
+    if (ch == '.' ||
+        ((ch == 'e' || ch == 'E') && b == 10) ||
+        ((ch == 'p' || ch == 'P') && (b == 16 || b == 2)))
+        tcc_error("floating-point constants are unavailable in "
+                  "the eBPF-hosted compiler");
+    {
+#else
     if (ch == '.' ||
         ((ch == 'e' || ch == 'E') && b == 10) ||
         ((ch == 'p' || ch == 'P') && (b == 16 || b == 2))) {
@@ -2431,6 +2480,7 @@ static void parse_number(const char *p)
             }
         }
     } else {
+#endif
         unsigned long long n, n1;
         int lcount, ucount, ov = 0;
         const char *p1;
@@ -3623,7 +3673,11 @@ static void tcc_predefs(TCCState *s1, CString *cs, int is_asm)
       cstr_cat(cs,
         /* load more predefs and __builtins */
 #if CONFIG_TCC_PREDEFS
+#ifdef TCC_EBPF_HOST
+        #include TCC_EBPF_TCCDEFS /* include generated strings */
+#else
         #include "tccdefs_.h" /* include as strings */
+#endif
 #else
         "#include <tccdefs.h>\n" /* load at runtime */
 #endif
@@ -3769,6 +3823,7 @@ ST_FUNC void tccpp_delete(TCCState *s)
 
 static int pp_need_space(int a, int b);
 
+#ifndef TCC_EBPF_HOST
 static void tok_print(const int *str, const char *msg, ...)
 {
     FILE *fp = tcc_state->ppfp;
@@ -3792,6 +3847,16 @@ static void tok_print(const int *str, const char *msg, ...)
     }
     fprintf(fp, "\n");
 }
+#else
+static void tok_print_fixed(const int *str, const char *msg,
+                            const unsigned long *args, unsigned nargs)
+{
+    (void)str;
+    (void)msg;
+    (void)args;
+    (void)nargs;
+}
+#endif
 
 static void pp_line(TCCState *s1, BufferedFile *f, int level)
 {

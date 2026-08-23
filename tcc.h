@@ -23,7 +23,11 @@
 
 #define _GNU_SOURCE
 #define _DARWIN_C_SOURCE
+#ifdef TCC_EBPF_HOST
+#include "async-ebpf-host/include/config.h"
+#else
 #include "config.h"
+#endif
 
 #include <stdarg.h>
 #include <stdlib.h>
@@ -113,7 +117,17 @@ extern long double strtold (const char *__nptr, char **__endptr);
 #define countof(tab) (sizeof(tab) / sizeof((tab)[0]))
 #endif
 
-#ifdef _MSC_VER
+#ifdef TCC_EBPF_HOST
+# define TCC_EBPF_ALWAYS_INLINE __attribute__((always_inline))
+#else
+# define TCC_EBPF_ALWAYS_INLINE
+#endif
+
+#ifdef TCC_EBPF_HOST
+# define NORETURN
+# define ALIGNED(x) __attribute__((aligned(x)))
+# define PRINTF_LIKE(x,y)
+#elif defined(_MSC_VER)
 # define NORETURN __declspec(noreturn)
 # define ALIGNED(x) __declspec(align(x))
 # define PRINTF_LIKE(x,y)
@@ -1263,9 +1277,21 @@ ST_FUNC void libc_free(void *ptr);
 #define realloc(p, s) use_tcc_realloc(p, s)
 #undef strdup
 #define strdup(s) use_tcc_strdup(s)
+#ifdef TCC_EBPF_HOST
+# include <tcc-ebpf-format.h>
+PUB_FUNC int _tcc_error_noabort_fixed(const char *, const unsigned long *,
+                                      unsigned);
+PUB_FUNC void _tcc_error_fixed(const char *, const unsigned long *, unsigned);
+PUB_FUNC void _tcc_warning_fixed(const char *, const unsigned long *, unsigned);
+# define _tcc_error_noabort(...) \
+    TCC_EBPF_FMT_CALL1(_tcc_error_noabort_fixed, __VA_ARGS__)
+# define _tcc_error(...) TCC_EBPF_FMT_CALL1(_tcc_error_fixed, __VA_ARGS__)
+# define _tcc_warning(...) TCC_EBPF_FMT_CALL1(_tcc_warning_fixed, __VA_ARGS__)
+#else
 PUB_FUNC int _tcc_error_noabort(const char *fmt, ...) PRINTF_LIKE(1,2);
 PUB_FUNC NORETURN void _tcc_error(const char *fmt, ...) PRINTF_LIKE(1,2);
 PUB_FUNC void _tcc_warning(const char *fmt, ...) PRINTF_LIKE(1,2);
+#endif
 #define tcc_internal_error(msg) \
     tcc_error("internal compiler error in %s:%d: %s", __FUNCTION__,__LINE__,msg)
 
@@ -1277,7 +1303,13 @@ ST_FUNC void cstr_cat(CString *cstr, const char *str, int len);
 ST_FUNC void cstr_wccat(CString *cstr, int ch);
 ST_FUNC void cstr_new(CString *cstr);
 ST_FUNC void cstr_free(CString *cstr);
+#ifdef TCC_EBPF_HOST
+ST_FUNC int cstr_printf_fixed(CString *, const char *, const unsigned long *,
+                              unsigned);
+# define cstr_printf(...) TCC_EBPF_FMT_CALL2(cstr_printf_fixed, __VA_ARGS__)
+#else
 ST_FUNC int cstr_printf(CString *cs, const char *fmt, ...) PRINTF_LIKE(2,3);
+#endif
 ST_FUNC int cstr_vprintf(CString *cstr, const char *fmt, va_list ap);
 ST_FUNC void cstr_reset(CString *cstr);
 ST_FUNC void tcc_open_bf(TCCState *s1, const char *filename, int initlen);
@@ -2020,9 +2052,16 @@ static inline void post_sem(TCCSem *p) {
 #define lbounds_section     TCC_STATE_VAR(lbounds_section)
 #define symtab_section      TCC_STATE_VAR(symtab_section)
 #define gnu_ext             TCC_STATE_VAR(gnu_ext)
+#ifdef TCC_EBPF_HOST
+#define tcc_error_noabort(...) \
+    TCC_EBPF_FMT_CALL1(_tcc_error_noabort_fixed, __VA_ARGS__)
+#define tcc_error(...) TCC_EBPF_FMT_CALL1(_tcc_error_fixed, __VA_ARGS__)
+#define tcc_warning(...) TCC_EBPF_FMT_CALL1(_tcc_warning_fixed, __VA_ARGS__)
+#else
 #define tcc_error_noabort   TCC_SET_STATE(_tcc_error_noabort)
 #define tcc_error           TCC_SET_STATE(_tcc_error)
 #define tcc_warning         TCC_SET_STATE(_tcc_warning)
+#endif
 
 #define total_idents        TCC_STATE_VAR(total_idents)
 #define total_lines         TCC_STATE_VAR(total_lines)
@@ -2032,9 +2071,13 @@ PUB_FUNC void tcc_enter_state(TCCState *s1);
 PUB_FUNC void tcc_exit_state(TCCState *s1);
 
 /* conditional warning depending on switch */
+#ifdef TCC_EBPF_HOST
+#define tcc_warning_c(sw) tcc_warning
+#else
 #define tcc_warning_c(sw) TCC_SET_STATE((\
     tcc_state->warn_num = offsetof(TCCState, sw) \
     - offsetof(TCCState, warn_none), _tcc_warning))
+#endif
 
 /********************************************************/
 #endif /* _TCC_H */

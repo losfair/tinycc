@@ -2545,6 +2545,14 @@ gv2:
 #endif
 
 /* generate a floating point operation with constant propagation */
+#ifdef TCC_EBPF_HOST
+static void gen_opif(int op)
+{
+    (void)op;
+    tcc_error("floating-point expressions are unavailable in "
+              "the eBPF-hosted compiler");
+}
+#else
 static void gen_opif(int op)
 {
     int c1, c2, i, bt;
@@ -2649,6 +2657,7 @@ static void gen_opif(int op)
         }
     }
 }
+#endif
 
 /* print a type. If 'varstr' is not NULL, then the variable is also
    printed in the type */
@@ -3289,6 +3298,29 @@ error:
 
         c = (vtop->r & (VT_VALMASK | VT_LVAL | VT_SYM)) == VT_CONST;
         if (c) {
+#ifdef TCC_EBPF_HOST
+            if (sf || df)
+                tcc_error("floating-point casts are unavailable in "
+                          "the eBPF-hosted compiler");
+            if (sbt_bt == VT_LLONG || (PTR_SIZE == 8 && sbt == VT_PTR))
+                ;
+            else if (sbt & VT_UNSIGNED)
+                vtop->c.i = (uint32_t)vtop->c.i;
+            else
+                vtop->c.i = ((uint32_t)vtop->c.i | -(vtop->c.i & 0x80000000));
+
+            if (dbt_bt == VT_LLONG || (PTR_SIZE == 8 && dbt == VT_PTR))
+                ;
+            else if (dbt == VT_BOOL)
+                vtop->c.i = (vtop->c.i != 0);
+            else {
+                uint32_t m = dbt_bt == VT_BYTE ? 0xff :
+                             dbt_bt == VT_SHORT ? 0xffff : 0xffffffff;
+                vtop->c.i &= m;
+                if (!(dbt & VT_UNSIGNED))
+                    vtop->c.i |= -(vtop->c.i & ((m >> 1) + 1));
+            }
+#else
             /* constant case: we can do it now */
             /* XXX: in ISOC, cannot do it if error in convert */
             if (sbt == VT_FLOAT)
@@ -3342,6 +3374,7 @@ error:
                         vtop->c.i |= -(vtop->c.i & ((m >> 1) + 1));
                 }
             }
+#endif
             goto done;
 
         } else if (dbt == VT_BOOL
@@ -8235,7 +8268,8 @@ static void decl_initializer(init_params *p, CType *type, unsigned long c, int f
    are parsed. If 'v' is zero, then a reference to the new object
    is put in the value stack. If 'has_init' is 2, a special parsing
    is done to handle string constants. */
-static void decl_initializer_alloc(CType *type, AttributeDef *ad, int r, 
+static TCC_EBPF_ALWAYS_INLINE void decl_initializer_alloc(
+                                   CType *type, AttributeDef *ad, int r,
                                    int has_init, int v, int scope)
 {
     int size, align, addr;
