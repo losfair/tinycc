@@ -8,8 +8,18 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/tinycc-bootstrap.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
 case $(uname -m) in
-  aarch64|arm64) ;;
-  *) echo "bootstrap comparison requires an AArch64 host" >&2; exit 1 ;;
+  aarch64|arm64)
+    target_define=TCC_TARGET_ARM64
+    target_name=AArch64
+    ;;
+  x86_64|amd64)
+    target_define=TCC_TARGET_X86_64
+    target_name=x86-64
+    ;;
+  *)
+    echo "bootstrap comparison requires an AArch64 or x86-64 host" >&2
+    exit 1
+    ;;
 esac
 
 test -f "$async_worktree/Cargo.toml" || {
@@ -26,7 +36,8 @@ clang -DC2STR "$root/conftest.c" -o "$work/c2str"
 # Suppressing line markers makes this one self-contained translation unit.
 clang -E -P -Wno-macro-redefined -nostdinc \
   -I"$work" -I"$root/async-ebpf-host/include" -I"$root" \
-  -U__aarch64__ -DONE_SOURCE=1 -DTCC_TARGET_ARM64=1 \
+  -U__aarch64__ -U__x86_64__ -U__x86_64 -U__amd64__ -U__amd64 \
+  -DONE_SOURCE=1 -D"$target_define"=1 \
   -DTCC_EBPF_HOST=1 -DCONFIG_TCC_STATIC=1 -DCONFIG_TCC_SEMLOCK=0 \
   '-DTCC_EBPF_TCCDEFS=<tccdefs_.h>' \
   "$root/tcc.c" -o "$work/<string>"
@@ -59,6 +70,6 @@ fi
 
 bytes=$(wc -c < "$work/direct.o" | tr -d ' ')
 echo "bootstrap artifacts are identical"
-echo "target: AArch64 ELF relocatable"
+echo "target: $target_name ELF relocatable"
 echo "bytes: $bytes"
 echo "sha256: $digest"

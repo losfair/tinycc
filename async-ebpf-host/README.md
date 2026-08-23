@@ -32,11 +32,13 @@ cargo run --features testing --example tinycc_host -- \
   /tmp/add.o
 ```
 
-On an AArch64 host, `/tmp/add.o` is an AArch64 relocatable ELF object.
+The generated object targets the machine running `async-ebpf` (AArch64 or
+x86-64).
 
 The bootstrap comparison builds the freestanding TinyCC one-source unit once
 with the native TinyCC executable and once with TinyCC running inside
-`async-ebpf`, then requires the two AArch64 ELF artifacts to be byte-identical:
+`async-ebpf`, then requires the two ELF artifacts for the current host target
+to be byte-identical. Both AArch64 and x86-64 hosts are supported:
 
 ```sh
 ASYNC_EBPF_WORKTREE=/path/to/async-ebpf-tinycc \
