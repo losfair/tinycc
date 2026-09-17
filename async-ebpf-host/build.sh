@@ -7,10 +7,18 @@ stack_size=${TCC_EBPF_STACK_SIZE:-8388608}
 work=$(mktemp -d "${TMPDIR:-/tmp}/tinycc-ebpf.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
-case $(uname -m) in
+target=${TCC_EBPF_TARGET:-native}
+if [ "$target" = native ]; then target=$(uname -m); fi
+case "$target" in
   x86_64|amd64) host_define=TCC_TARGET_X86_64 ;;
   aarch64|arm64) host_define=TCC_TARGET_ARM64 ;;
-  *) echo "unsupported async-ebpf host architecture: $(uname -m)" >&2; exit 1 ;;
+  bpf|bpfel) host_define=TCC_TARGET_BPF ;;
+  *) echo "unsupported compiler target: $target" >&2; exit 1 ;;
+esac
+vfs=${TCC_EBPF_VFS:-0}
+case "$vfs" in
+  0|1) ;;
+  *) echo "TCC_EBPF_VFS must be 0 or 1" >&2; exit 1 ;;
 esac
 
 clang -DC2STR "$root/conftest.c" -o "$work/c2str"
@@ -18,7 +26,7 @@ clang -DC2STR "$root/conftest.c" -o "$work/c2str"
 
 clang -target bpf -mcpu=v3 -O2 -g0 -fno-builtin -fno-stack-protector \
   -nostdinc -I"$work" -I"$root/async-ebpf-host/include" -I"$root" \
-  -D"$host_define" "-DTCC_EBPF_STACK_SIZE=${stack_size}UL" '-DTCC_EBPF_TCCDEFS=<tccdefs_.h>' \
+  -D"$host_define" "-DTCC_EBPF_VFS=$vfs" "-DTCC_EBPF_STACK_SIZE=${stack_size}UL" '-DTCC_EBPF_TCCDEFS=<tccdefs_.h>' \
   -emit-llvm -c "$root/async-ebpf-host/guest.c" \
   -o "$work/guest.bc"
 llvm-dis "$work/guest.bc" -o "$work/guest.ll"

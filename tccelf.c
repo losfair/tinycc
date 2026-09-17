@@ -783,7 +783,7 @@ ST_FUNC TCC_EBPF_ALWAYS_INLINE int set_elf_sym(Section *s, addr_t value,
 }
 
 /* put relocation */
-ST_FUNC void put_elf_reloca(Section *symtab, Section *s, unsigned long offset,
+ST_FUNC TCC_EBPF_ALWAYS_INLINE void put_elf_reloca(Section *symtab, Section *s, unsigned long offset,
                             int type, int symbol, addr_t addend)
 {
     TCCState *s1 = s->s1;

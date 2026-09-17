@@ -719,7 +719,12 @@ static void error1(int mode, const char *fmt,
     (void)s1;
     if (mode == ERROR_ERROR) {
         extern unsigned long tcc_ebpf_fatal(const char *, unsigned long);
-        tcc_ebpf_fatal((const char *)cs.data, cs.size - 1);
+        tcc_ebpf_fatal((const char *)cs.data, cs.size);
+#if TCC_EBPF_VFS
+    } else {
+        extern unsigned long tcc_ebpf_diagnostic(const char *, unsigned long);
+        tcc_ebpf_diagnostic((const char *)cs.data, cs.size);
+#endif
     }
 #else
     if (!s1->error_func) {

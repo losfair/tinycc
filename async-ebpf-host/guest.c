@@ -1,6 +1,5 @@
-/* TinyCC compiled as an eBPF guest, while retaining the current host as its
-   code-generation target. This translation unit is intentionally separate
-   from bpf-gen.c: Clang compiles the compiler itself to eBPF. */
+/* Freestanding TinyCC running inside eBPF. The build chooses the output
+   architecture; optional VFS mode compiles a virtual file instead of a string. */
 #define ONE_SOURCE 1
 #define CONFIG_TCC_STATIC 1
 #define CONFIG_TCC_BACKTRACE 0
@@ -130,11 +129,34 @@ static int tcc_ebpf_compile(TCCState *s, const char *source)
     int rc;
     s->nostdinc = 1;
     s->nostdlib = 1;
+#ifdef TCC_TARGET_BPF
+    s->nocommon = 1;
+#endif
+#if TCC_EBPF_VFS
+    tcc_add_include_path(s, "/src");
+#endif
     rc = tcc_set_output_type(s, TCC_OUTPUT_OBJ);
-    if (!rc)
-        rc = tcc_compile_string(s, source);
     if (!rc) {
-        rc = tcc_output_file(s, "tinycc-bootstrap.o");
+#if TCC_EBPF_VFS
+        rc = tcc_add_file(s, source);
+#else
+        rc = tcc_compile_string(s, source);
+#endif
+    }
+    if (!rc) {
+#ifdef TCC_TARGET_BPF
+        int i;
+        for (i = 1; i < s->nb_sections; ++i) {
+            Section *sec = s->sections[i];
+            if (sec->sh_type == SHT_NOBITS) {
+                unsigned long size = sec->data_offset;
+                sec->sh_type = SHT_PROGBITS;
+                sec->data_offset = 0;
+                section_ptr_add(sec, size);
+            }
+        }
+#endif
+        rc = tcc_output_file(s, "tinycc-output.o");
     }
     return rc ? (unsigned)rc : 1;
 }
@@ -453,17 +475,33 @@ void exit(int status)
     (void)status;
 }
 
+#if TCC_EBPF_VFS
+extern long tcc_ebpf_open_file(const char *, unsigned long, unsigned long);
+extern long tcc_ebpf_read_file(unsigned long, void *, unsigned long);
+extern long tcc_ebpf_close_file(unsigned long);
+#endif
+
 int tcc_ebpf_open(const char *name, int flags, int mode)
 {
-    (void)name;
-    (void)flags;
     (void)mode;
-    return 1;
+    if (flags & O_WRONLY)
+        return 1; /* Serialized ELF output uses tcc_ebpf_write. */
+#if TCC_EBPF_VFS
+    return tcc_ebpf_open_file(name, strlen(name), flags);
+#else
+    (void)name;
+    return -1;
+#endif
 }
 
 int close(int fd)
 {
+#if TCC_EBPF_VFS
+    if (fd != 1)
+        return tcc_ebpf_close_file(fd);
+#else
     (void)fd;
+#endif
     return 0;
 }
 
@@ -481,10 +519,14 @@ int remove(const char *name)
 
 ssize_t read(int fd, void *dst, size_t n)
 {
+#if TCC_EBPF_VFS
+    return tcc_ebpf_read_file(fd, dst, n);
+#else
     (void)fd;
     (void)dst;
     (void)n;
     return -1;
+#endif
 }
 
 off_t lseek(int fd, off_t off, int whence)

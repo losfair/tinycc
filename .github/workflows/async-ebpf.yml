@@ -1,0 +1,35 @@
+name: async-ebpf compiler
+on:
+  push:
+    branches: [ebpf]
+  pull_request:
+    branches: [ebpf]
+permissions:
+  contents: read
+jobs:
+  bootstrap:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: losfair/async-ebpf
+          ref: 7e8a7cbce195d68a1d579608b7a28b55f6fce7fd
+          path: .async-ebpf
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y clang-19 llvm-19 build-essential perl
+      - run: echo /usr/lib/llvm-19/bin >> "$GITHUB_PATH"
+      - run: ./configure --cc=clang
+      - name: Compare native-target bootstrap artifacts
+        env:
+          ASYNC_EBPF_WORKTREE: ${{ github.workspace }}/.async-ebpf
+        run: ./async-ebpf-host/bootstrap.sh
+      - name: Compile eBPF inside eBPF and execute its output
+        env:
+          ASYNC_EBPF_WORKTREE: ${{ github.workspace }}/.async-ebpf
+        run: ./async-ebpf-host/test-bpf.sh
