@@ -8004,10 +8004,17 @@ static void init_putv(init_params *p, CType *type, unsigned long c)
             /* intptr_t may need a reloc too, see tcctest.c:relocation_test() */
 	    case VT_LLONG:
 	    case VT_PTR:
-	        if (vtop->r & VT_SYM)
+	        if (vtop->r & VT_SYM) {
+#if SHT_RELX == SHT_RELA
 	          greloca(sec, vtop->sym, c, R_DATA_PTR, val);
-	        else
-	          write64le(ptr, val);
+	          break;
+#else
+	          /* On a REL target the addend has no home in the relocation,
+	             so it is stored in the relocated field instead. */
+	          greloca(sec, vtop->sym, c, R_DATA_PTR, 0);
+#endif
+	        }
+	        write64le(ptr, val);
 	        break;
             case VT_INT:
                 write32le(ptr, val);

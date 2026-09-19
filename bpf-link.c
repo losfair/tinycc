@@ -2,8 +2,8 @@
 
 #define EM_TCC_TARGET EM_BPF
 
-#define R_DATA_32  R_BPF_64_64
-#define R_DATA_PTR R_BPF_64_64
+#define R_DATA_32  R_BPF_64_ABS32
+#define R_DATA_PTR R_BPF_64_ABS64
 #define R_JMP_SLOT R_BPF_NONE
 #define R_GLOB_DAT R_BPF_NONE
 #define R_COPY     R_BPF_NONE
@@ -29,6 +29,8 @@ ST_FUNC int code_reloc(int reloc_type)
         return 1;
     case R_BPF_NONE:
     case R_BPF_64_64:
+    case R_BPF_64_ABS64:
+    case R_BPF_64_ABS32:
         return 0;
     }
     return -1;
@@ -39,6 +41,8 @@ ST_FUNC int gotplt_entry_type(int reloc_type)
     switch (reloc_type) {
     case R_BPF_NONE:
     case R_BPF_64_64:
+    case R_BPF_64_ABS64:
+    case R_BPF_64_ABS32:
     case R_BPF_64_32:
         return NO_GOTPLT_ENTRY;
     }
@@ -58,14 +62,29 @@ ST_FUNC void relocate_plt(TCCState *s1)
 ST_FUNC void relocate(TCCState *s1, ElfW_Rel *rel, int type,
                       unsigned char *ptr, addr_t addr, addr_t val)
 {
+    /* BPF uses SHT_REL, so the addend is stored in the relocated field
+       itself and has to be added to the symbol value here. */
     switch (type) {
     case R_BPF_NONE:
         break;
     case R_BPF_64_64:
+        /* lddw: the 64 bit immediate is split over the two instruction
+           halves, each holding 32 bits in its imm field. */
+        val += (uint64_t)read32le(ptr + 4)
+               | ((uint64_t)read32le(ptr + 12) << 32);
         write32le(ptr + 4, (uint32_t)val);
         write32le(ptr + 12, (uint32_t)(val >> 32));
         break;
+    case R_BPF_64_ABS64:
+        val += read64le(ptr);
+        write64le(ptr, val);
+        break;
+    case R_BPF_64_ABS32:
+        val += read32le(ptr);
+        write32le(ptr, (uint32_t)val);
+        break;
     case R_BPF_64_32:
+        /* call: the displacement is self-relative, so no addend applies. */
         write32le(ptr + 4, (uint32_t)((val - addr) / 8 - 1));
         break;
     default:
