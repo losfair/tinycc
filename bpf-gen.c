@@ -349,12 +349,20 @@ static int invert_jop(int op)
     return BPF_JA;
 }
 
+/* Jump labels are chained through the instruction they refer to, using the
+   instruction's offset in the text section as the label value.  tcc reserves
+   0 for the empty list, so bias the label by one instruction: a jump emitted
+   at offset 0 would otherwise be indistinguishable from "no jump", and gsym()
+   would neither patch it nor clear nocode_wanted. */
+#define BPF_LABEL(insn_ind) ((insn_ind) + 8)
+#define BPF_LABEL_IND(label) ((label) - 8)
+
 ST_FUNC void gsym_addr(int t, int a)
 {
     while (t) {
-        unsigned char *p = cur_text_section->data + t;
+        unsigned char *p = cur_text_section->data + BPF_LABEL_IND(t);
         int next = read32le(p + 4);
-        int off = (a - t) / 8 - 1;
+        int off = (a - BPF_LABEL_IND(t)) / 8 - 1;
         check_off(off);
         write16le(p + 2, off);
         write32le(p + 4, 0);
@@ -367,7 +375,7 @@ ST_FUNC int gjmp(int t)
     if (nocode_wanted)
         return t;
     obpf(BPF_JMP | BPF_JA, 0, 0, 0, t);
-    return ind - 8;
+    return BPF_LABEL(ind - 8);
 }
 
 ST_FUNC void gjmp_addr(int a)
@@ -391,7 +399,8 @@ ST_FUNC int gjmp_append(int n, int t)
     if (n) {
         int n1 = n, n2;
         unsigned char *p;
-        while ((n2 = read32le((p = cur_text_section->data + n1) + 4)))
+        while ((n2 = read32le(
+                    (p = cur_text_section->data + BPF_LABEL_IND(n1)) + 4)))
             n1 = n2;
         write32le(p + 4, t);
         t = n;
