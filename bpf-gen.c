@@ -151,8 +151,20 @@ static void o_ldsym64(int dst, Sym *sym, int64_t addend)
 {
     if (nocode_wanted)
         return;
-    greloca(cur_text_section, sym, ind, R_BPF_64_64, addend);
-    o_ldimm64(dst, 0);
+    /* BPF relocations are SHT_REL and carry no addend field, so a symbol
+       reference with a non-zero offset cannot be expressed by the
+       relocation alone.  Load the bare symbol and apply the offset with a
+       separate add, which is what LLVM emits and what every BPF loader
+       understands.  Offsets too wide for an ALU immediate fall back to the
+       psABI implicit addend, held in the lddw immediate halves. */
+    greloca(cur_text_section, sym, ind, R_BPF_64_64, 0);
+    if (addend == (int32_t)addend) {
+        o_ldimm64(dst, 0);
+        if (addend)
+            o_alui(BPF_ALU64, BPF_ADD, dst, (int32_t)addend);
+    } else {
+        o_ldimm64(dst, addend);
+    }
 }
 
 static int bpf_section_sym_index(Section *sec)
@@ -201,8 +213,15 @@ static int load_ptr_base(int r, SValue *sv, int *off)
     int v = fr & VT_VALMASK;
     *off = sv->c.i;
     if (fr & VT_SYM) {
-        o_ldsym64(r, sv->sym, sv->c.i);
-        *off = 0;
+        /* A constant offset that fits the access instruction's own offset
+           field costs nothing, so leave it there and relocate the bare
+           symbol. */
+        if (*off >= -32768 && *off <= 32767) {
+            o_ldsym64(r, sv->sym, 0);
+        } else {
+            o_ldsym64(r, sv->sym, *off);
+            *off = 0;
+        }
         return r;
     }
     if (v == VT_LOCAL)
